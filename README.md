@@ -143,8 +143,3 @@ python run_fatevec.py
 | `fatevec_derivatives.pdf` | Smoothed dv/dt curves per cell type |
 | `fatevec_peak_summary.csv` | Time and magnitude of max fate commitment rate per cell type |
 
-## Citation
-
-If you use the distance matrix computation, please cite:
-
-> Choi J, et al. (2023). DNA Typewriter for recording order of events at the single-cell level. *Nature*. https://doi.org/10.1038/s41586-023-06817-8
