@@ -1,0 +1,19 @@
+Cell type,Time of max dv/dt,Max d(vk)/dt
+Surface ectoderm,0.29106,3.24825
+Primitive erythroid cells,0.26636,3.51496
+First heart field,0.17770,3.92686
+Forebrain/midbrain,0.32747,3.90072
+Cranial neural crest,0.28792,3.51648
+Placodal area,0.18590,3.50099
+Spinal cord,0.17858,3.99883
+Lateral plate and intermediate mesoderm,0.22154,3.35930
+Hindbrain,0.32983,3.27359
+Gut,0.23930,3.52915
+Endothelium,0.17567,3.24190
+NMP,0.29700,3.13924
+Hematoendothelial progenitors,0.30921,3.37171
+Amniotic ectoderm,0.19046,3.83492
+Paraxial mesoderm,0.33638,3.76572
+Allantois,0.29914,3.50534
+Second heart field,0.24849,4.14296
+Notochord,0.15042,5.94348
