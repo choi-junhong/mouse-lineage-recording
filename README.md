@@ -63,7 +63,7 @@ pip install numpy pandas scipy matplotlib
 
 ### External dependency
 
-This pipeline requires **`extra_script_choi_brief.R`** from [Choi et al.](https://doi.org/10.1038/s41586-023-06817-8) for computing the normalized distance matrix from raw TAPE barcodes. This script is **not included** in this repository. Place it at `external/extra_script_choi_brief.R`.
+This pipeline requires **`extra_script_choi_brief.R`** from [Choi et al.](https://doi.org/10.1038/s41586-022-04922-8) for computing the normalized distance matrix from raw TAPE barcodes. This script is **not included** in this repository. Place it at `external/extra_script_choi_brief.R`.
 
 > If you already have a precomputed distance matrix CSV, this external script is not needed.
 
