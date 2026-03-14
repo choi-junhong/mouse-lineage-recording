@@ -129,8 +129,6 @@ python run_fatevec.py
 |------|-------------|
 | `E8_tree.nwk` | Newick format tree |
 | `cell_annot_with_clades.csv` | Cell annotations with `clone_id` column |
-| `tree_edges.csv` | Edge list with branch lengths |
-| `tree_node_tip_map.csv` | Internal node to descendant tip mapping |
 | `tree_nodes_summary.csv` | Node summary (depth, clade size, parent) |
 
 ### Step 2 (Python)
