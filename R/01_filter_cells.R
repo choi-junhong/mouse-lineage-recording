@@ -8,10 +8,12 @@
 #' @param long_paths    Character vector of paths to long-format tape selection CSVs
 #' @param annot_file    Path to cell-type annotation CSV
 #' @param min_tapes     Minimum number of edited TAPEs required per cell (default: 8)
+#' @param excluded_types Cell types excluded before clustering (default: ExVE)
 #' @return A list with:
 #'   - cell_list_filtered: character vector of filtered cell IDs
 #'   - cell_annot_filtered: data.frame of annotations for filtered cells
-filter_cells <- function(tape_file, long_paths, annot_file, min_tapes = 8) {
+filter_cells <- function(tape_file, long_paths, annot_file, min_tapes = 8,
+                         excluded_types = "Extraembryonic visceral endoderm") {
 
   # Load cell annotations
   cell_annot_all <- read.csv(
@@ -19,6 +21,11 @@ filter_cells <- function(tape_file, long_paths, annot_file, min_tapes = 8) {
     stringsAsFactors = FALSE,
     na.strings = c("", "NA")
   )
+
+  stopifnot(all(c("Cell", "subcluster") %in% names(cell_annot_all)),
+            !anyDuplicated(cell_annot_all$Cell))
+  cell_annot_all <- cell_annot_all %>%
+    filter(!is.na(subcluster), !subcluster %in% excluded_types)
 
   # Load TAPE barcode pivot table to get the master cell list
   tape_table <- read.csv(

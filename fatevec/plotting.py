@@ -1,71 +1,50 @@
-"""Visualization functions for FateVec analysis."""
-
+"""FateVec curves and half-maximum onset on normalized tree depth."""
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.signal import savgol_filter
+from .analysis import find_onset_times
 
 
 def plot_fate_curves(avg_v, t_array, cells, ax=None, **kwargs):
-    """Plot average fate-proportion curves for each cell type.
-
-    Args:
-        avg_v: Dict mapping cell-type index -> 1D array of proportions.
-        t_array: 1D array of time values.
-        cells: Dict mapping cell-type label -> index.
-        ax: Optional matplotlib Axes. Creates a new figure if None.
-        **kwargs: Additional keyword arguments passed to ax.plot().
-
-    Returns:
-        matplotlib Axes.
-    """
+    """Plot each cell type's mean FateVec component, V(x)."""
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 6))
-
-    idx_to_label = {v: k for k, v in cells.items()}
-
-    for key in sorted(avg_v.keys()):
-        label = idx_to_label.get(key, f"Type {key}")
-        ax.plot(t_array, avg_v[key], label=label, **kwargs)
-
-    ax.set_xlabel("Pseudo-time (depth)")
-    ax.set_ylabel("Fate proportion")
-    ax.set_title("Average Fate Vector Components vs. Pseudo-time")
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize="small")
+    labels = {index: label for label, index in cells.items()}
+    for i, key in enumerate(sorted(avg_v)):
+        style = {'color': plt.get_cmap('tab20')(i % 20), **kwargs}
+        ax.plot(t_array, avg_v[key], label=labels.get(key, f'Type {key}'), **style)
+    ax.set_xlabel('Normalized tree depth (root = 0, tips = 1)')
+    ax.set_ylabel('Mean FateVec component')
+    ax.set_title('FateVec profiles — merged E8.5')
+    ax.set_xlim(0, 1)
+    ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize='small')
     ax.figure.tight_layout()
     return ax
 
 
-def plot_derivative_curves(avg_v, t_array, cells,
-                           window_length=3501, polyorder=4,
-                           ax=None, **kwargs):
-    """Plot smoothed derivative (dv/dt) curves for each cell type.
+def plot_derivative_curves(avg_v, t_array, cells, window_length=301, polyorder=4,
+                           ax=None, onset_times=None, derivatives=None, **kwargs):
+    """Plot dF/dx and mark its leading half-maximum crossing, T_on.
 
-    Args:
-        avg_v: Dict mapping cell-type index -> 1D array of proportions.
-        t_array: 1D array of time values.
-        cells: Dict mapping cell-type label -> index.
-        window_length: Savitzky-Golay window length.
-        polyorder: Polynomial order for smoothing.
-        ax: Optional matplotlib Axes.
-        **kwargs: Additional keyword arguments passed to ax.plot().
-
-    Returns:
-        matplotlib Axes.
+    F(x) = (V(x) - V(0)) / (1 - V(0)). Optional precomputed arrays ensure
+    the plotted velocities and exported onset values are identical.
     """
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 6))
-
-    dt = np.mean(np.diff(t_array))
-    idx_to_label = {v: k for k, v in cells.items()}
-
-    for key in sorted(avg_v.keys()):
-        dvdt = savgol_filter(avg_v[key], window_length, polyorder, deriv=1, delta=dt)
-        label = idx_to_label.get(key, f"Type {key}")
-        ax.plot(t_array, dvdt, label=label, **kwargs)
-
-    ax.set_xlabel("Pseudo-time (depth)")
-    ax.set_ylabel("d(fate proportion)/dt")
-    ax.set_title("Fate Commitment Rate (dv/dt) vs. Pseudo-time")
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize="small")
+    if onset_times is None or derivatives is None:
+        onset_times, _, derivatives = find_onset_times(
+            avg_v, t_array, window_length=window_length, polyorder=polyorder)
+    labels = {index: label for label, index in cells.items()}
+    for i, key in enumerate(sorted(avg_v)):
+        style = {'color': plt.get_cmap('tab20')(i % 20), **kwargs}
+        line, = ax.plot(t_array, derivatives[key], label=labels.get(key, f'Type {key}'), **style)
+        onset = onset_times[key]
+        if np.isfinite(onset):
+            ax.plot(onset, np.interp(onset, t_array, derivatives[key]), 'o',
+                    color=line.get_color(), markersize=4)
+    ax.set_xlabel('Normalized tree depth (root = 0, tips = 1)')
+    ax.set_ylabel('Fate-bias acquisition velocity, dF/dx')
+    ax.set_title(r'Fate-bias acquisition — dots mark $T_{on}$')
+    ax.set_xlim(0, 1)
+    ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize='small')
     ax.figure.tight_layout()
     return ax

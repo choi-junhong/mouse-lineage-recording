@@ -43,7 +43,7 @@ assign_clades <- function(tree, k = 50) {
   groups  <- split(names(grp_tip), grp_tip)
   tr_grp  <- ggtree::groupOTU(tree, groups, group_name = "clade")
 
-  clade_map <- clade_map_from_trgrp(tr_grp)
+  clade_map <- clade_map_from_cutree(grp_tip)
   message(sprintf("Assigned %d clades to %d tips.", k, length(grp_tip)))
 
   list(

@@ -6,7 +6,7 @@ from .analysis import (
     trace_back,
     vector_component_vs_time,
     avg_vector_component_vs_time,
-    find_peak_derivatives,
+    find_onset_times,
 )
 
 __all__ = [
@@ -16,5 +16,5 @@ __all__ = [
     "trace_back",
     "vector_component_vs_time",
     "avg_vector_component_vs_time",
-    "find_peak_derivatives",
+    "find_onset_times",
 ]

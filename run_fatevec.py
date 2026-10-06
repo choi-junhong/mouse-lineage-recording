@@ -1,116 +1,79 @@
 #!/usr/bin/env python3
-"""
-run_fatevec.py - FateVec: Cell-Fate Commitment Analysis on Lineage Trees
+"""Compute FateVec curves and T_on from the included merged E8.5 tree.
 
-Usage:
-    1. Run Step 1 (run_pipeline.R) first to generate tree CSVs.
-    2. Edit the configuration section below to point to your outputs.
-    3. Run: python run_fatevec.py
+Run `python run_fatevec.py` directly; the required tree CSVs are included.
+T_on is the leading half-maximum crossing on normalized tree depth.
 """
-
-import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
 from fatevec import (
-    construct_tree,
-    convert_csv_to_nodes,
-    avg_vector_component_vs_time,
-    find_peak_derivatives,
+    construct_tree, convert_csv_to_nodes,
+    avg_vector_component_vs_time, find_onset_times,
 )
 from fatevec.plotting import plot_fate_curves, plot_derivative_curves
 
-# ==============================================================================
-# Configuration
-# ==============================================================================
+BASE_DIR = Path(__file__).resolve().parent
+TREE_NODES_SUMMARY = BASE_DIR / 'outputs/tree_nodes_summary.csv'
+CELL_ANNOT_CSV = BASE_DIR / 'outputs/cell_annot_with_clades.csv'
+CELL_TYPE_COL = 'subcluster'
+OUTPUT_DIR = BASE_DIR / 'outputs'
 
-# Input files (outputs from Step 1)
-TREE_NODES_SUMMARY = os.path.join("outputs", "tree_nodes_summary.csv")
-CELL_ANNOT_CSV     = os.path.join("outputs", "cell_annot_with_clades.csv")
-
-# Column name for cell type in the annotation CSV (groups fate vectors by this)
-CELL_TYPE_COL = "subcluster"
-
-# Output directory
-OUTPUT_DIR = "outputs"
-
-# Pseudo-time range for fate vector sampling
-T_MIN = -0.05
-T_MAX = 0.50
-T_POINTS = 10001
-
-# Savitzky-Golay smoothing parameters
-WINDOW_LENGTH = 3501   # Must be odd
+# Dimensionless tree depth: root = 0, tips = 1 (not developmental time).
+T_POINTS = 1001
+WINDOW_LENGTH = 301  # 30% of the grid, rounded to an odd length
 POLYORDER = 4
 
-# ==============================================================================
-# Step 1: Parse tree and build node structure
-# ==============================================================================
-print("=== Step 1: Parsing tree and cell annotations ===")
-data, cells, n_cells = convert_csv_to_nodes(
-    TREE_NODES_SUMMARY, CELL_ANNOT_CSV, cell_type_col=CELL_TYPE_COL
-)
-print(f"  Cell types found: {list(cells.keys())}")
 
-print("\n=== Step 2: Constructing tree ===")
-nodes, head = construct_tree(data, cells, n_cells)
+def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    data, cells, n_types = convert_csv_to_nodes(
+        TREE_NODES_SUMMARY, CELL_ANNOT_CSV, cell_type_col=CELL_TYPE_COL)
+    if any(is_tip and label is None for _, is_tip, label, *_ in data):
+        raise ValueError('Every tree tip must have a cell-type annotation.')
+    nodes, head = construct_tree(data, cells, n_types)
+    tip_depths = np.array([n.depth for n in nodes.values() if n.is_tip])
+    tip_depth = float(tip_depths.max())
+    if (not np.isfinite(tip_depths).all() or tip_depth <= 0 or
+            not np.allclose(tip_depths, tip_depth, atol=1e-8, rtol=0)):
+        raise ValueError('The reference analysis requires an ultrametric tree.')
+    if not np.isfinite(head.depth):
+        head.depth = 0.0
+    if not np.isclose(head.depth, 0):
+        raise ValueError('Root depth must be zero.')
+    for node in nodes.values():
+        node.depth /= tip_depth
+    head.update()
+    print(f'Analyzing {len(tip_depths):,} tips and {n_types} cell types.')
+    t_array = np.linspace(0.0, 1.0, T_POINTS)
+    avg_v = avg_vector_component_vs_time(nodes, t_array)
+    onset, maxima, derivatives = find_onset_times(
+        avg_v, t_array, window_length=WINDOW_LENGTH, polyorder=POLYORDER)
 
-print("\n=== Step 3: Bottom-up fate vector propagation ===")
-head.update()
-print(f"  Root fate vector: {head.v}")
-print(f"  Root cell counts: {head.n}")
+    ax = plot_fate_curves(avg_v, t_array, cells)
+    ax.figure.savefig(OUTPUT_DIR / 'fatevec_curves.pdf', bbox_inches='tight',
+                      metadata={'CreationDate': None, 'ModDate': None})
+    plt.close(ax.figure)
+    ax = plot_derivative_curves(
+        avg_v, t_array, cells, window_length=WINDOW_LENGTH,
+        polyorder=POLYORDER, onset_times=onset, derivatives=derivatives)
+    ax.figure.savefig(OUTPUT_DIR / 'fatevec_derivatives.pdf', bbox_inches='tight',
+                      metadata={'CreationDate': None, 'ModDate': None})
+    plt.close(ax.figure)
 
-# ==============================================================================
-# Step 4: Compute average fate curves
-# ==============================================================================
-print("\n=== Step 4: Computing average fate curves ===")
-t_array = np.linspace(T_MIN, T_MAX, T_POINTS)
-avg_v = avg_vector_component_vs_time(nodes, t_array)
+    labels = {index: label for label, index in cells.items()}
+    summary = pd.DataFrame([
+        {'Cell type': labels[key], 'T_on': onset[key], 'Max dF/dx': maxima[key]}
+        for key in sorted(onset)
+    ])
+    path = OUTPUT_DIR / 'fatevec_onset_summary.csv'
+    summary.to_csv(path, index=False, float_format='%.10f')
+    print(summary.to_string(index=False))
+    print(f'Saved T_on summary to {path}')
 
-# Plot fate curves
-ax = plot_fate_curves(avg_v, t_array, cells)
-fate_plot_path = os.path.join(OUTPUT_DIR, "fatevec_curves.pdf")
-ax.figure.savefig(fate_plot_path, dpi=150, bbox_inches="tight")
-print(f"  Saved fate curves to: {fate_plot_path}")
-plt.close()
 
-# ==============================================================================
-# Step 5: Find peak derivatives
-# ==============================================================================
-print("\n=== Step 5: Finding peak commitment rates ===")
-peak_times, peak_values, derivatives = find_peak_derivatives(
-    avg_v, t_array, window_length=WINDOW_LENGTH, polyorder=POLYORDER
-)
-
-# Plot derivative curves
-ax = plot_derivative_curves(
-    avg_v, t_array, cells,
-    window_length=WINDOW_LENGTH, polyorder=POLYORDER
-)
-deriv_plot_path = os.path.join(OUTPUT_DIR, "fatevec_derivatives.pdf")
-ax.figure.savefig(deriv_plot_path, dpi=150, bbox_inches="tight")
-print(f"  Saved derivative curves to: {deriv_plot_path}")
-plt.close()
-
-# ==============================================================================
-# Step 6: Export results
-# ==============================================================================
-print("\n=== Step 6: Exporting results ===")
-idx_to_label = {v: k for k, v in cells.items()}
-records = []
-for key in sorted(peak_times.keys()):
-    cell_type = idx_to_label.get(key, f"Type_{key}")
-    records.append({
-        "Cell type": cell_type,
-        "Time of max dv/dt": f"{peak_times[key]:.5f}",
-        "Max d(vk)/dt": f"{peak_values[key]:.5f}",
-    })
-
-df = pd.DataFrame(records)
-output_csv = os.path.join(OUTPUT_DIR, "fatevec_peak_summary.csv")
-df.to_csv(output_csv, index=False)
-print(f"  Saved peak summary to: {output_csv}")
-
-print("\n=== FateVec analysis complete! ===")
+if __name__ == '__main__':
+    main()

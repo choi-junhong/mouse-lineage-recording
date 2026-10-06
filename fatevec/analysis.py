@@ -1,4 +1,4 @@
-"""Fate vector analysis: tracing, averaging, and peak derivative finding."""
+"""Fate vector analysis: tracing, averaging, and half-maximum onset estimation."""
 
 import numpy as np
 from scipy.signal import savgol_filter
@@ -82,33 +82,61 @@ def avg_vector_component_vs_time(nodes, t_array):
     return avg_v
 
 
-def find_peak_derivatives(avg_v, t_array, window_length=3501, polyorder=4):
-    """Find the time of maximum fate commitment rate for each cell type.
+def find_onset_times(avg_v, t_array, window_length=301, polyorder=4):
+    """Find the leading half-maximum crossing of each fate-bias velocity.
 
-    Applies Savitzky-Golay smoothing to compute the derivative dv/dt,
-    then locates the global maximum.
+    For each mean FateVec component V, normalize its dynamic range as
+    F(x) = (V(x) - V(0)) / (1 - V(0)). A Savitzky-Golay derivative gives
+    dF/dx. T_on is the FIRST crossing of half its global maximum, with
+    linear interpolation between grid points. If the curve starts above
+    this threshold, T_on is the first grid point. Flat/uninformative
+    curves have NaN onset and peak velocity.
 
-    Args:
-        avg_v: Dict from avg_vector_component_vs_time.
-        t_array: 1D array of time values.
-        window_length: Savitzky-Golay window length (must be odd).
-        polyorder: Polynomial order for smoothing.
+    The reference analysis uses normalized tree depth x in [0, 1], 1,001
+    points, a 301-point window (30% of the grid), and polynomial order 4.
+    No conversion to developmental time is performed.
 
     Returns:
-        peak_times: Dict mapping cell-type index -> time of max dv/dt.
-        peak_values: Dict mapping cell-type index -> max dv/dt value.
-        derivatives: Dict mapping cell-type index -> full dv/dt array.
+        onset_times: Dict mapping cell-type index to T_on.
+        peak_values: Dict mapping cell-type index to maximum dF/dx.
+        derivatives: Dict mapping cell-type index to its full dF/dx array.
     """
-    dt = np.mean(np.diff(t_array))
-    peak_times = {}
-    peak_values = {}
-    derivatives = {}
+    t_array = np.asarray(t_array, dtype=float)
+    if (t_array.ndim != 1 or len(t_array) < 3 or
+            not np.isfinite(t_array).all()):
+        raise ValueError("Depth grid must be a finite one-dimensional array.")
+    steps = np.diff(t_array)
+    if (steps <= 0).any() or not np.allclose(steps, steps[0]):
+        raise ValueError("Depth grid must be increasing and uniformly spaced.")
+    if (not isinstance(window_length, (int, np.integer)) or
+            window_length % 2 != 1 or not 0 <= polyorder < window_length or
+            window_length > len(t_array)):
+        raise ValueError("Use an odd window <= grid length and > polyorder.")
 
-    for key, v_array in avg_v.items():
-        dvdt = savgol_filter(v_array, window_length, polyorder, deriv=1, delta=dt)
-        max_index = np.argmax(dvdt)
-        peak_times[key] = t_array[max_index]
-        peak_values[key] = dvdt[max_index]
-        derivatives[key] = dvdt
-
-    return peak_times, peak_values, derivatives
+    onset_times, peak_values, derivatives = {}, {}, {}
+    for key, values in avg_v.items():
+        v = np.asarray(values, dtype=float)
+        if v.shape != t_array.shape or not np.isfinite(v).all():
+            raise ValueError(f"Invalid fate curve for cell type {key}.")
+        onset_times[key] = np.nan
+        peak_values[key] = np.nan
+        if v[0] >= 1 - 1e-12:
+            derivatives[key] = np.full_like(v, np.nan)
+            continue
+        fraction = (v - v[0]) / (1 - v[0])
+        velocity = savgol_filter(fraction, window_length, polyorder,
+                                deriv=1, delta=float(steps[0]))
+        derivatives[key] = velocity
+        maximum = float(np.max(velocity))
+        if maximum <= 1e-10:
+            continue
+        peak_values[key] = maximum
+        threshold = 0.5 * maximum
+        index = int(np.flatnonzero(velocity >= threshold)[0])
+        if index == 0:
+            onset_times[key] = float(t_array[0])
+        else:
+            onset_times[key] = float(np.interp(
+                threshold, velocity[index - 1:index + 1],
+                t_array[index - 1:index + 1]))
+    return onset_times, peak_values, derivatives

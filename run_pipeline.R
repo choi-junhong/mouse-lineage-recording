@@ -9,8 +9,8 @@
 #      Or source it interactively in RStudio
 #
 # Prerequisites:
-#   - extra_script_choi_brief.R (Choi et al.) for computing normalized distance
-#     matrices. This script is NOT included; see README.md for details.
+#   - The included reference tree and merged annotations for the default run.
+#   - Optional raw TAPE v2 inputs are needed only when REBUILD_TREE is enabled.
 #   - Install R packages: ape, dplyr, readr, ggtree, ggnewscale, phangorn,
 #     tibble, here, scales
 #
@@ -25,37 +25,38 @@ source(file.path("R", "04_plot_tree.R"))
 source(file.path("R", "05_export_tree.R"))
 
 # ---- (Optional) Source external distance-matrix script ----
-# Uncomment if you need to recompute the distance matrix from raw TAPE data:
+# Uncomment to load the accompanying analysis helpers:
 # source(CHOI_SCRIPT_PATH)
 
-# ==============================================================================
-# Step 1: Filter cells by tape recovery
-# ==============================================================================
-message("=== Step 1: Filtering cells ===")
-filter_result <- filter_cells(
-  tape_file  = TAPE_FILE,
-  long_paths = TAPE_LONG_FILES,
-  annot_file = ANNOT_FILE,
-  min_tapes  = MIN_TAPES
-)
-cell_list          <- filter_result$cell_list
-cell_list_filtered <- filter_result$cell_list_filtered
-cell_annot_filtered <- filter_result$cell_annot_filtered
-
-# ==============================================================================
-# Step 2: Build lineage tree
-# ==============================================================================
-message("\n=== Step 2: Building tree ===")
-tree <- build_tree(
-  dm_file            = DM_FILE,
-  cell_list          = cell_list,
-  cell_list_filtered = cell_list_filtered,
-  method             = HCLUST_METHOD
-)
+# Use the included merged E8.5 noExVE tree by default. Rebuilding from
+# raw TAPE data is optional and requires the matching one-library-per-cell v2 inputs.
+if (REBUILD_TREE) {
+  message("=== Filtering merged cells and rebuilding the tree ===")
+  filter_result <- filter_cells(
+    tape_file = TAPE_FILE, long_paths = TAPE_LONG_FILES,
+    annot_file = ANNOT_FILE, min_tapes = MIN_TAPES,
+    excluded_types = EXCLUDED_CELL_TYPES
+  )
+  cell_annot_filtered <- filter_result$cell_annot_filtered
+  tree <- build_tree(
+    dm_file = DM_FILE, cell_list = filter_result$cell_list,
+    cell_list_filtered = filter_result$cell_list_filtered,
+    method = HCLUST_METHOD
+  )
+} else {
+  message("=== Loading the included merged E8.5 noExVE reference tree ===")
+  tree <- ape::read.tree(TREE_FILE)
+  annotations <- read.csv(ANNOT_FILE, stringsAsFactors = FALSE)
+  stopifnot(!anyDuplicated(tree$tip.label), !anyDuplicated(annotations$Cell),
+            all(tree$tip.label %in% annotations$Cell))
+  cell_annot_filtered <- annotations[match(tree$tip.label, annotations$Cell), , drop = FALSE]
+  stopifnot(!any(is.na(cell_annot_filtered$subcluster)),
+            !any(cell_annot_filtered$subcluster %in% EXCLUDED_CELL_TYPES))
+}
 
 # Save Newick format
 nwk_path <- file.path(OUTPUT_DIR, "E8_tree.nwk")
-ape::write.tree(tree, file = nwk_path)
+ape::write.tree(tree, file = nwk_path, digits = 17)
 message(sprintf("Newick tree saved to: %s", nwk_path))
 
 # ==============================================================================
@@ -77,7 +78,7 @@ message(sprintf("Annotated metadata saved to: %s", annot_out))
 # ==============================================================================
 message("\n=== Step 4: Plotting tree ===")
 p <- plot_fan_tree(tr_grp, clade_palette = CLADE_PALETTE)
-print(p)
+if (interactive()) print(p)
 
 # Save plot
 plot_path <- file.path(OUTPUT_DIR, "E8_tree_fan.pdf")

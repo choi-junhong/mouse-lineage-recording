@@ -1,141 +1,104 @@
 # DNA Typewriter Lineage Tree Reconstruction & FateVec Analysis
 
-Reconstruct cell lineage trees from DNA Typewriter TAPE barcode data and analyze cell-fate commitment dynamics.
+Reconstruct cell lineage trees from DNA Typewriter TAPE records and summarize fate-bias acquisition with **T_on**, the leading half-maximum crossing of each velocity profile.
 
-## Overview
+## Included E8.5 reference
 
-### Step 1: Tree Reconstruction (R)
-1. **Filters cells** by minimum number of edited TAPEs recovered
-2. **Builds a lineage tree** via UPGMA hierarchical clustering on a pairwise distance matrix
-3. **Assigns clade labels** using `cutree` and annotates cell metadata
-4. **Visualizes** the tree as a circular (fan) layout colored by clade
-5. **Exports** tree structure (tips, edges, node-tip mappings) to CSV
+The E8.5 example uses the updated **merged scRNA-seq annotations and TAPE v2 tree**:
 
-### Step 2: FateVec Analysis (Python)
-1. **Reconstructs** the tree from Step 1 CSV exports in Python
-2. **Propagates fate vectors** bottom-up: each node gets a normalized cell-type proportion vector
-3. **Traces** each tip's fate proportion from root to leaf over pseudo-time
-4. **Smooths and differentiates** to find the time of maximum fate commitment for each cell type
-5. **Exports** peak commitment times to CSV
+- `data/E8_annotations.csv`: final consensus annotations for **13,832 unique cells**, retaining the existing `Cell,subcluster` format.
+- `outputs/E8_tree.nwk`: the **10,579-tip noExVE tree**, containing **19 cell types**. Cells have at least eight Site1-edited TAPEs and a final annotation; extraembryonic visceral endoderm (ExVE) was excluded **before clustering**. Amniotic ectoderm and allantois remain included.
+- `outputs/cell_annot_with_clades.csv`: matching tree-tip annotations in the existing `Cell,subcluster,clone_id` format. The 50 clades are recomputed on the merged tree.
+- `outputs/tree_nodes_summary.csv` and `outputs/tree_edges.csv`: matching node and edge tables with their original column layouts.
 
-## Repository Structure
+`Cell` is the unique 16-base barcode. The old library suffixes are removed. TAPE v2 retains all records from one selected library per cell, based on its GEX capture assignment; it does not combine site calls from different libraries. The default tree corresponds to `E8_tree_TAPE8_v2_noExVE`, with final `subcluster_consensus` labels.
 
-```
-dna-typewriter-tree/
-├── R/                          # Step 1: Tree reconstruction
-│   ├── 00_config.R             # Paths, parameters, color palette
-│   ├── 01_filter_cells.R       # Cell filtering by TAPE threshold
-│   ├── 02_build_tree.R         # Distance matrix → hclust → phylo
-│   ├── 03_assign_clades.R      # cutree clade assignment
-│   ├── 04_plot_tree.R          # Circular tree visualization (ggtree)
-│   └── 05_export_tree.R        # Export tree structure to CSV
-├── run_pipeline.R              # Step 1 entry point
-├── fatevec/                    # Step 2: FateVec analysis
-│   ├── __init__.py
-│   ├── node.py                 # Node class with bottom-up fate vector propagation
-│   ├── tree.py                 # Tree construction from CSV
-│   ├── analysis.py             # Fate vector tracing & peak derivative finding
-│   └── plotting.py             # Visualization functions
-├── run_fatevec.py              # Step 2 entry point
-├── data/                       # Input data (not tracked)
-├── outputs/                    # Generated outputs (not tracked)
-└── README.md
+The update replaces the existing annotation, tree, summary-table and PDF outputs. Raw sequencing reads, expression matrices, Seurat objects and additional datasets are not included.
+
+## T_on definition
+
+Let x be **normalized phylogenetic depth**: the root is 0 and the ultrametric tips are 1. For each cell type k, FateVec propagates count-weighted fate vectors through the tree and averages the corresponding component over that type's tip-to-root paths, giving V_k(x).
+
+Normalize the change from its root-depth value:
+
+```text
+F_k(x) = [V_k(x) - V_k(0)] / [1 - V_k(0)]
+velocity_k(x) = dF_k(x) / dx
+T_on,k = first x at which velocity_k(x) reaches 0.5 × max(velocity_k)
 ```
 
-## Requirements
+The reference calculation uses 1,001 equally spaced points in [0, 1], a Savitzky–Golay derivative with a 301-point window (30% of the grid), and polynomial order 4. The first threshold crossing is linearly interpolated between adjacent points. If the velocity already exceeds the threshold at the root, T_on is 0. Flat or already-pure profiles have undefined (NaN) T_on.
 
-### R packages (Step 1)
+T_on replaces the previous peak-location summary; it is computed from the leading half-maximum crossing, not by relabeling peak values. It is dimensionless and is not converted to embryonic days or calibrated against developmental time. All 19 reference onsets agree with the updated E8.5 analysis within its saved rounding precision (maximum absolute difference < 5 × 10⁻⁷).
+
+## Run FateVec on the included example
+
+Install the Python dependencies:
+
+```bash
+pip install numpy pandas scipy matplotlib
+python run_fatevec.py
+```
+
+The included tree CSVs are sufficient; running the R reconstruction first is optional. Configuration in `run_fatevec.py` selects `subcluster` as the cell-type column and defines the grid and smoothing settings.
+
+| Output | Description |
+|---|---|
+| `outputs/fatevec_curves.pdf` | Mean FateVec components over normalized tree depth |
+| `outputs/fatevec_derivatives.pdf` | dF/dx profiles; dots mark T_on |
+| `outputs/fatevec_onset_summary.csv` | `Cell type`, `T_on`, and `Max dF/dx` |
+
+The onset CSV replaces `fatevec_peak_summary.csv`. The two existing PDF filenames are retained.
+
+Run the numerical checks with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## R tree workflow
+
+The default R workflow reads the included merged Newick tree, matches its tips to `data/E8_annotations.csv`, assigns 50 clades with `cutree`, and regenerates the tree exports and fan plot:
 
 ```r
 install.packages(c("ape", "phangorn", "dplyr", "readr", "tibble", "here", "scales"))
-
-# ggtree (Bioconductor)
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install(c("ggtree", "ggnewscale"))
 ```
 
-### Python packages (Step 2)
-
-```bash
-pip install numpy pandas scipy matplotlib
-```
-
-### External dependency
-
-This pipeline requires **`extra_script_choi_brief.R`** from [Choi et al.](https://doi.org/10.1038/s41586-022-04922-8) for computing the normalized distance matrix from raw TAPE barcodes. This script is **not included** in this repository. Place it at `external/extra_script_choi_brief.R`.
-
-> If you already have a precomputed distance matrix CSV, this external script is not needed.
-
-## Input Data Format
-
-Place your input files in the `data/` directory.
-
-### 1. Distance Matrix CSV (`Step7_*_DM_*.csv`)
-
-Square, symmetric matrix of pairwise cell distances (no row/column headers).
-
-### 2. TAPE Barcode Pivot Table (`Step6_*_TapeBCpivot_*.csv`)
-
-Wide-format CSV with a `Cell` column. Each row is a cell; columns represent TAPE barcodes.
-
-### 3. Long-format TAPE Selection Files (`Step5_*_TapeSelect_*.csv`)
-
-One file per library. Must contain columns `Cell` and `Site1`. Rows with `Site1 != "None"` count as edited TAPEs.
-
-### 4. Cell Annotation CSV (`*_annotations_*.csv`)
-
-Cell metadata with at minimum `Cell` and `CellType` columns (CellType at column index 2).
-
-| Cell | ... | CellType | ... |
-|------|-----|----------|-----|
-| cell_001 | ... | Neuron | ... |
-
-## Usage
-
-### Step 1: Build Lineage Tree
-
-1. Edit `R/00_config.R` to set your data file paths and parameters.
-
-2. Run:
 ```bash
 Rscript run_pipeline.R
 ```
 
-This generates tree CSVs and visualizations in `outputs/`.
+Run the R command from the repository root. Set `LINEAGE_OUTPUT_DIR` to write a separate copy of the exports. The local R workflow also generates a fan PDF, tip list and node-to-tip mapping; these auxiliary files are not part of the distributed reference dataset.
 
-### Step 2: FateVec Analysis
+### Optional reconstruction from TAPE v2 inputs
 
-1. Edit the configuration section in `run_fatevec.py`:
+To rebuild the tree rather than use the included Newick, supply the matching files below and enable `REBUILD_TREE` in `R/00_config.R`, or run:
 
-```python
-TREE_NODES_SUMMARY = "outputs/tree_nodes_summary.csv"
-CELL_ANNOT_CSV     = "outputs/cell_annot_with_clades.csv"
-CELL_TYPE_COL      = 2          # 0-based column index for CellType
-WINDOW_LENGTH      = 3501       # Savitzky-Golay window (must be odd)
-POLYORDER          = 4          # Polynomial order for smoothing
-```
-
-2. Run:
 ```bash
-python run_fatevec.py
+LINEAGE_REBUILD_TREE=true Rscript run_pipeline.R
 ```
 
-## Outputs
+| Input | Format |
+|---|---|
+| `data/Step7_E8_DM_v2.csv` | Square symmetric distance matrix without row/column headers; order must match the pivot table |
+| `data/Step6_E8_v2_TapeBCpivot.csv` | Wide TAPE table with a `Cell` column and one row per merged cell |
+| `data/Step5_E8_v2.csv` | One-library-per-cell long table with `Cell`, `TapeBC` and `Site1` |
+| `data/E8_annotations.csv` | Included final annotation with `Cell` and `subcluster` |
 
-### Step 1 (R)
+The first three inputs are not included. The filter requires at least eight edited TAPEs and an annotation, then excludes ExVE before UPGMA clustering. Use the matching v2 inputs together; the old three-library tables use different cell identifiers and are not interchangeable with the merged example. The included helper `external/extra_script_choi_brief.R` accompanies the [Choi et al. method](https://doi.org/10.1038/s41586-022-04922-8); the reconstruction entry point reads a precomputed distance matrix.
 
-| File | Description |
-|------|-------------|
-| `E8_tree.nwk` | Newick format tree |
-| `cell_annot_with_clades.csv` | Cell annotations with `clone_id` column |
-| `tree_nodes_summary.csv` | Node summary (depth, clade size, parent) |
+## Repository structure
 
-### Step 2 (Python)
-
-| File | Description |
-|------|-------------|
-| `fatevec_curves.pdf` | Average fate proportion curves over pseudo-time |
-| `fatevec_derivatives.pdf` | Smoothed dv/dt curves per cell type |
-| `fatevec_peak_summary.csv` | Time and magnitude of max fate commitment rate per cell type |
-
+```text
+R/                   Filtering, tree reconstruction, clades, plotting and export
+run_pipeline.R       R entry point
+fatevec/              Fate-vector propagation, tracing, T_on and plotting
+run_fatevec.py        Python entry point
+external/             Existing R helper
+data/                 E8.5 merged cell-type annotation
+outputs/              Matching tree, annotation, node/edge tables and FateVec results
+tests/                Numerical tests of the T_on estimator
+```
